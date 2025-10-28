@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, users } from "../drizzle/schema";
+import { InsertUser, users, organizations, InsertOrganization, dataUploads, InsertDataUpload, financialData, InsertFinancialData, reports, InsertReport } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -89,4 +89,88 @@ export async function getUserByOpenId(openId: string) {
   return result.length > 0 ? result[0] : undefined;
 }
 
-// TODO: add feature queries here as your schema grows.
+// Organization queries
+export async function getAllOrganizations() {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(organizations);
+}
+
+export async function getOrganizationById(id: number) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.select().from(organizations).where(eq(organizations.id, id)).limit(1);
+  return result.length > 0 ? result[0] : undefined;
+}
+
+export async function createOrganization(org: InsertOrganization) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const result = await db.insert(organizations).values(org);
+  return result;
+}
+
+// Data upload queries
+export async function createDataUpload(upload: InsertDataUpload) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const result = await db.insert(dataUploads).values(upload);
+  return result;
+}
+
+export async function getDataUploadsByOrganization(organizationId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(dataUploads).where(eq(dataUploads.organizationId, organizationId)).orderBy(dataUploads.uploadedAt);
+}
+
+export async function getAllDataUploads() {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(dataUploads).orderBy(dataUploads.uploadedAt);
+}
+
+export async function updateDataUploadStatus(id: number, status: "pending" | "processing" | "completed" | "failed", errorMessage?: string) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  return db.update(dataUploads).set({ status, errorMessage }).where(eq(dataUploads.id, id));
+}
+
+// Financial data queries
+export async function createFinancialData(data: InsertFinancialData[]) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  return db.insert(financialData).values(data);
+}
+
+export async function getFinancialDataByUpload(uploadId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(financialData).where(eq(financialData.uploadId, uploadId));
+}
+
+export async function getFinancialDataByOrganizationAndPeriod(organizationId: number, period: string) {
+  const db = await getDb();
+  if (!db) return [];
+  const { and } = await import("drizzle-orm");
+  return db.select().from(financialData).where(and(eq(financialData.organizationId, organizationId), eq(financialData.period, period)));
+}
+
+// Report queries
+export async function createReport(report: InsertReport) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  return db.insert(reports).values(report);
+}
+
+export async function getReportsByOrganization(organizationId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(reports).where(eq(reports.organizationId, organizationId)).orderBy(reports.generatedAt);
+}
+
+export async function getAllReports() {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(reports).orderBy(reports.generatedAt);
+}
