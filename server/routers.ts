@@ -4,7 +4,7 @@ import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, protectedProcedure, router } from "./_core/trpc";
 import * as db from "./db";
-import { parseCSV, mapCSVRow, validateRequiredFields } from "./utils/csvParser";
+import { parseCSV, parseCSVFile, mapCSVRow, validateRequiredFields } from "./utils/csvParser";
 import { CSV_MAPPINGS, findColumn, parseDate } from "../shared/csvMappings";
 import { calculateServicesKPIs, calculateSaaSKPIs } from "./utils/kpiCalculations";
 import { TRPCError } from "@trpc/server";
@@ -109,11 +109,83 @@ export const appRouter = router({
             }
           });
 
-          // TODO: Store data in database
-          // For now, just return success with metadata
+          // Get upload type ID
+          const uploadTypeRecord = await db.getUploadTypeByCode(input.uploadType);
+          if (!uploadTypeRecord) {
+            throw new TRPCError({ 
+              code: 'BAD_REQUEST', 
+              message: `Upload type not found: ${input.uploadType}` 
+            });
+          }
+
+          // Create upload record
+          const primaryPeriod = Array.from(periods)[0] || new Date().toISOString().slice(0, 7);
+          const uploadId = await db.createDataUpload({
+            organizationId: null, // Multi-entity upload
+            uploadTypeId: uploadTypeRecord.id,
+            uploadedBy: ctx.user.id,
+            period: primaryPeriod,
+            fileName: input.filename,
+            fileType: 'csv',
+            fileUrl: '', // In-memory upload, no file URL
+            status: 'processing',
+          });
+
+          // Map and store data based on upload type
+          const mappedRows = rows.map(row => mapCSVRow(row, input.uploadType));
+          
+          try {
+            switch (input.uploadType) {
+              case 'journal_lines':
+                await db.insertJournalLines(mappedRows.map(row => ({
+                  ...row,
+                  uploadId,
+                })));
+                break;
+              
+              case 'customer_invoices':
+                await db.insertCustomerInvoices(mappedRows.map(row => ({
+                  ...row,
+                  uploadId,
+                })));
+                break;
+
+              case 'supplier_invoices':
+                await db.insertSupplierInvoices(mappedRows.map(row => ({
+                  ...row,
+                  uploadId,
+                })));
+                break;
+
+              case 'customer_contracts':
+                await db.insertCustomerContracts(mappedRows.map(row => ({
+                  ...row,
+                  uploadId,
+                })));
+                break;
+
+              case 'time_entries':
+                await db.insertTimeEntries(mappedRows.map(row => ({
+                  ...row,
+                  uploadId,
+                })));
+                break;
+
+              default:
+                console.warn(`No handler for upload type: ${input.uploadType}`);
+            }
+
+            // Update upload status to completed
+            await db.updateDataUploadStatus(uploadId, 'completed', rows.length);
+
+          } catch (dbError: any) {
+            await db.updateDataUploadStatus(uploadId, 'failed', 0, dbError.message);
+            throw dbError;
+          }
           
           return {
             success: true,
+            uploadId,
             recordsProcessed: rows.length,
             entitiesFound: Array.from(entities),
             periodsFound: Array.from(periods),
@@ -167,7 +239,7 @@ export const appRouter = router({
           await db.updateDataUploadStatus(input.uploadId, 'processing');
 
           // Parse CSV
-          const parsed = await parseCSV(input.filePath);
+          const parsed = await parseCSVFile(input.filePath);
 
           // Map and validate rows
           const mappedRows = parsed.rows.map(row => mapCSVRow(row, input.uploadTypeCode));

@@ -1,8 +1,15 @@
 import { drizzle } from "drizzle-orm/mysql2";
+import mysql from "mysql2/promise";
 import { organizations, uploadTypes } from "../drizzle/schema";
 
 async function seedComplete() {
-  const db = drizzle(process.env.DATABASE_URL!);
+  const connection = await mysql.createConnection({
+    host: 'localhost',
+    user: 'workday_user',
+    password: 'workday_pass',
+    database: 'workday_reporting'
+  });
+  const db = drizzle(connection);
 
   console.log("🌱 Seeding organizations...");
 

@@ -8,10 +8,19 @@ export interface ParsedCSVData {
 }
 
 /**
- * Parse CSV file and return structured data
+ * Parse CSV content (string or file path) and return structured data
  */
-export async function parseCSV(filePath: string): Promise<ParsedCSVData> {
-  const fileContent = fs.readFileSync(filePath, 'utf-8');
+export function parseCSV(input: string): Record<string, string>[] {
+  let fileContent: string;
+  
+  // Check if input is a file path or CSV content
+  if (input.includes('\n') || input.includes(',')) {
+    // It's CSV content
+    fileContent = input;
+  } else {
+    // It's a file path
+    fileContent = fs.readFileSync(input, 'utf-8');
+  }
   
   // Remove BOM if present
   const cleanContent = fileContent.replace(/^\uFEFF/, '');
@@ -23,6 +32,15 @@ export async function parseCSV(filePath: string): Promise<ParsedCSVData> {
     relax_column_count: true,
   });
 
+  return records;
+}
+
+/**
+ * Parse CSV file (async version for file operations)
+ */
+export async function parseCSVFile(filePath: string): Promise<ParsedCSVData> {
+  const fileContent = fs.readFileSync(filePath, 'utf-8');
+  const records = parseCSV(fileContent);
   const headers = records.length > 0 ? Object.keys(records[0]) : [];
   
   return {
