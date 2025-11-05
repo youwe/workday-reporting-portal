@@ -6,6 +6,7 @@
 import { readFileSync } from 'fs';
 import { parse } from 'csv-parse/sync';
 import { drizzle } from 'drizzle-orm/mysql2';
+import mysql from 'mysql2/promise';
 import { 
   journalLines, 
   customerInvoices, 
@@ -25,7 +26,14 @@ import {
 import { CSV_MAPPINGS, findColumn, parseDate, parseAmount } from '../shared/csvMappings';
 import { eq } from 'drizzle-orm';
 
-const db = drizzle(process.env.DATABASE_URL!);
+// Create MySQL connection
+const connection = await mysql.createConnection({
+  host: 'localhost',
+  user: 'workday_user',
+  password: 'workday_pass',
+  database: 'workday_reporting',
+});
+const db = drizzle(connection);
 
 // Entity name normalization
 const ENTITY_MAPPINGS: Record<string, string> = {
