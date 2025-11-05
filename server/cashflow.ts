@@ -11,16 +11,21 @@
  */
 
 import mysql from 'mysql2/promise';
+import type { Connection } from 'mysql2/promise';
 
-// Create database connection
-const connection = await mysql.createConnection({
-  host: 'localhost',
-  user: 'workday_user',
-  password: 'workday_pass',
-  database: 'workday_reporting',
-});
+let dbConnection: Connection | null = null;
 
-const db = { execute: connection.execute.bind(connection) };
+async function getDb() {
+  if (!dbConnection) {
+    dbConnection = await mysql.createConnection({
+      host: 'localhost',
+      user: 'workday_user',
+      password: 'workday_pass',
+      database: 'workday_reporting',
+    });
+  }
+  return dbConnection;
+}
 
 export interface CashflowProjection {
   month: string;
@@ -54,6 +59,7 @@ export interface PaymentBehaviorAnalysis {
  * Analyze customer payment behavior
  */
 export async function analyzeCustomerPaymentBehavior(): Promise<PaymentBehaviorAnalysis[]> {
+  const db = await getDb();
   const query = `
     SELECT 
       cp.customer,
@@ -75,7 +81,7 @@ export async function analyzeCustomerPaymentBehavior(): Promise<PaymentBehaviorA
   return (rows as any[]).map(row => ({
     customer: row.customer,
     averagePaymentDays: Math.round(row.avgDays || 30),
-    paymentReliability: Math.min(1, Math.max(0, 1 - (row.avgDays - 30) / 60)), // Score based on deviation from 30 days
+    paymentReliability: Math.min(1, Math.max(0, 1 - (row.avgDays - 30) / 60)),
     totalPaid: parseFloat(row.totalPaid || '0'),
     paymentCount: parseInt(row.paymentCount || '0'),
   }));
@@ -85,6 +91,7 @@ export async function analyzeCustomerPaymentBehavior(): Promise<PaymentBehaviorA
  * Get current cash position from bank statements
  */
 export async function getCurrentCashPosition(): Promise<number> {
+  const db = await getDb();
   const query = `
     SELECT 
       SUM(
@@ -106,6 +113,7 @@ export async function getCurrentCashPosition(): Promise<number> {
  * Get outstanding receivables (unpaid customer invoices)
  */
 export async function getOutstandingReceivables(): Promise<{ total: number; aged: any[] }> {
+  const db = await getDb();
   const query = `
     SELECT 
       ci.customer,
@@ -130,6 +138,7 @@ export async function getOutstandingReceivables(): Promise<{ total: number; aged
  * Get outstanding payables (unpaid supplier invoices)
  */
 export async function getOutstandingPayables(): Promise<{ total: number; aged: any[] }> {
+  const db = await getDb();
   const query = `
     SELECT 
       si.supplier,
@@ -154,6 +163,7 @@ export async function getOutstandingPayables(): Promise<{ total: number; aged: a
  * Get scheduled billing installments (future revenue)
  */
 export async function getScheduledBillingInstallments(): Promise<any[]> {
+  const db = await getDb();
   const query = `
     SELECT 
       DATE_FORMAT(STR_TO_DATE(invoiceDate, '%m/%d/%y'), '%Y-%m') as month,
@@ -175,6 +185,7 @@ export async function getScheduledBillingInstallments(): Promise<any[]> {
  * Calculate historical monthly cashflow
  */
 export async function getHistoricalCashflow(months: number = 6): Promise<any[]> {
+  const db = await getDb();
   const query = `
     SELECT 
       DATE_FORMAT(STR_TO_DATE(paymentDate, '%m/%d/%y'), '%Y-%m') as month,
@@ -194,6 +205,8 @@ export async function getHistoricalCashflow(months: number = 6): Promise<any[]> 
  * Generate 12-month cashflow forecast
  */
 export async function generate12MonthForecast(): Promise<CashflowProjection[]> {
+  const db = await getDb();
+  
   // Get base data
   const currentCash = await getCurrentCashPosition();
   const receivables = await getOutstandingReceivables();
@@ -238,22 +251,16 @@ export async function generate12MonthForecast(): Promise<CashflowProjection[]> {
     const scheduledAmount = scheduledForMonth ? parseFloat(scheduledForMonth.amount || '0') : 0;
 
     // Calculate expected inflows
-    // Month 1-2: High confidence (scheduled + historical average)
-    // Month 3-6: Medium confidence (historical average with growth adjustment)
-    // Month 7-12: Low confidence (historical average)
     let expectedInflow = avgMonthlyInflow;
     let confidence: 'high' | 'medium' | 'low' = 'low';
 
     if (i < 2) {
-      // First 2 months: include scheduled billing and outstanding receivables (partial)
       expectedInflow = scheduledAmount + (avgMonthlyInflow * 1.1) + (receivables.total * 0.3 / 2);
       confidence = 'high';
     } else if (i < 6) {
-      // Months 3-6: historical average with slight growth
       expectedInflow = avgMonthlyInflow * 1.05 + (scheduledAmount * 0.8);
       confidence = 'medium';
     } else {
-      // Months 7-12: conservative estimate
       expectedInflow = avgMonthlyInflow;
       confidence = 'low';
     }
@@ -261,7 +268,6 @@ export async function generate12MonthForecast(): Promise<CashflowProjection[]> {
     // Calculate expected outflows
     let expectedOutflow = avgMonthlyOutflow;
     if (i < 2) {
-      // First 2 months: include portion of outstanding payables
       expectedOutflow = avgMonthlyOutflow + (payables.total * 0.4 / 2);
     }
 

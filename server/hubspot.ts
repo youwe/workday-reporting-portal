@@ -10,16 +10,21 @@
  */
 
 import mysql from 'mysql2/promise';
+import type { Connection } from 'mysql2/promise';
 
-// Create database connection
-const connection = await mysql.createConnection({
-  host: 'localhost',
-  user: 'workday_user',
-  password: 'workday_pass',
-  database: 'workday_reporting',
-});
+let dbConnection: Connection | null = null;
 
-const db = { execute: connection.execute.bind(connection) };
+async function getDb() {
+  if (!dbConnection) {
+    dbConnection = await mysql.createConnection({
+      host: 'localhost',
+      user: 'workday_user',
+      password: 'workday_pass',
+      database: 'workday_reporting',
+    });
+  }
+  return dbConnection;
+}
 
 export interface DealStageAnalysis {
   stage: string;
@@ -51,9 +56,9 @@ export interface MAPAnalysis {
     conversionRate: number;
   }[];
   leadQuality: {
-    highValue: number; // Deals > 50k
-    mediumValue: number; // Deals 10k-50k
-    lowValue: number; // Deals < 10k
+    highValue: number;
+    mediumValue: number;
+    lowValue: number;
   };
   timeToClose: {
     average: number;
@@ -67,6 +72,7 @@ export interface MAPAnalysis {
  * Get all deals by stage
  */
 export async function getDealsByStage(): Promise<DealStageAnalysis[]> {
+  const db = await getDb();
   const query = `
     SELECT 
       dealStage as stage,
@@ -98,7 +104,6 @@ export async function getDealsByStage(): Promise<DealStageAnalysis[]> {
 
   const [rows] = await db.execute(query);
   
-  // Calculate conversion rates (deals that moved to next stage)
   const stages = rows as any[];
   const totalDeals = stages.reduce((sum, s) => sum + parseInt(s.count || '0'), 0);
 
@@ -116,6 +121,7 @@ export async function getDealsByStage(): Promise<DealStageAnalysis[]> {
  * Get owner performance metrics
  */
 export async function getOwnerPerformance(): Promise<OwnerPerformance[]> {
+  const db = await getDb();
   const query = `
     SELECT 
       dealOwner as owner,
@@ -161,6 +167,7 @@ export async function getOwnerPerformance(): Promise<OwnerPerformance[]> {
  * Get conversion metrics
  */
 export async function getConversionMetrics() {
+  const db = await getDb();
   const query = `
     SELECT 
       COUNT(*) as totalDeals,
@@ -204,6 +211,8 @@ export async function getConversionMetrics() {
  * Get MAP (Marketing Automation Platform) analysis
  */
 export async function getMAPAnalysis(): Promise<MAPAnalysis> {
+  const db = await getDb();
+  
   // Get deals by type
   const typeQuery = `
     SELECT 
@@ -284,7 +293,7 @@ export async function getMAPAnalysis(): Promise<MAPAnalysis> {
   const [timeRows] = await db.execute(timeQuery);
   const timeData = (timeRows as any[])[0];
 
-  // Calculate median (approximation)
+  // Calculate median
   const medianQuery = `
     SELECT days
     FROM (
@@ -345,10 +354,10 @@ export async function getSalesPipelineAnalysis() {
 
   // Calculate pipeline health score (0-100)
   const healthFactors = {
-    winRate: Math.min(100, conversion.winRate * 2), // Target 50% win rate
-    pipelineValue: Math.min(100, (conversion.pipelineValue / 1000000) * 20), // €5M pipeline = 100
-    dealVelocity: Math.min(100, (365 / Math.max(conversion.averageWinTime, 1)) * 10), // Faster = better
-    stageDistribution: stages.length >= 5 ? 100 : (stages.length / 5) * 100, // Healthy pipeline has deals in all stages
+    winRate: Math.min(100, conversion.winRate * 2),
+    pipelineValue: Math.min(100, (conversion.pipelineValue / 1000000) * 20),
+    dealVelocity: Math.min(100, (365 / Math.max(conversion.averageWinTime, 1)) * 10),
+    stageDistribution: stages.length >= 5 ? 100 : (stages.length / 5) * 100,
   };
 
   const healthScore = Math.round(
