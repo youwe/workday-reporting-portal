@@ -7,6 +7,8 @@ import * as db from "./db";
 import { parseCSV, parseCSVFile, mapCSVRow, validateRequiredFields } from "./utils/csvParser";
 import { CSV_MAPPINGS, findColumn, parseDate } from "../shared/csvMappings";
 import { calculateServicesKPIs, calculateSaaSKPIs } from "./utils/kpiCalculations";
+import * as cashflow from "./cashflow";
+import * as hubspot from "./hubspot";
 import { TRPCError } from "@trpc/server";
 import { chatWithAssistant, generateSuggestedQuestions, generateExecutiveSummary } from "./utils/aiAssistant";
 
@@ -345,6 +347,52 @@ export const appRouter = router({
       .query(async ({ input }) => {
         return await db.getKpisByOrganizationAndPeriod(input.organizationId, input.period);
       }),
+  }),
+
+  // Cashflow Forecast
+  cashflow: router({    summary: protectedProcedure.query(async () => {
+      return await cashflow.getCashflowSummary();
+    }),
+
+    forecast: protectedProcedure
+      .input(z.object({ months: z.number().optional() }))
+      .query(async ({ input }) => {
+        return await cashflow.generate12MonthForecast();
+      }),
+
+    paymentBehavior: protectedProcedure.query(async () => {
+      return await cashflow.analyzeCustomerPaymentBehavior();
+    }),
+
+    receivables: protectedProcedure.query(async () => {
+      return await cashflow.getOutstandingReceivables();
+    }),
+
+    payables: protectedProcedure.query(async () => {
+      return await cashflow.getOutstandingPayables();
+    }),
+  }),
+
+  // HubSpot Sales Pipeline
+  hubspot: router({    pipeline: protectedProcedure.query(async () => {
+      return await hubspot.getSalesPipelineAnalysis();
+    }),
+
+    mapAnalysis: protectedProcedure.query(async () => {
+      return await hubspot.getMAPAnalysis();
+    }),
+
+    dealsByStage: protectedProcedure.query(async () => {
+      return await hubspot.getDealsByStage();
+    }),
+
+    conversionMetrics: protectedProcedure.query(async () => {
+      return await hubspot.getConversionMetrics();
+    }),
+
+    ownerPerformance: protectedProcedure.query(async () => {
+      return await hubspot.getOwnerPerformance();
+    }),
   }),
 
   // Reports
