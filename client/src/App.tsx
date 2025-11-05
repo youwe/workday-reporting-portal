@@ -6,6 +6,8 @@ import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import Dashboard from "./pages/Dashboard";
 import UploadWizard from "./pages/UploadWizard";
+import Reports from "./pages/Reports";
+import Analytics from "./pages/Analytics";
 import { useAuth } from "./_core/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { APP_LOGO, APP_TITLE, getLoginUrl } from "./const";
@@ -193,8 +195,8 @@ function Router() {
       <Switch>
         <Route path="/" component={Dashboard} />
         <Route path="/upload" component={UploadWizard} />
-        <Route path="/reports" component={() => <div className="p-8">Reports (Coming Soon)</div>} />
-        <Route path="/analytics" component={() => <div className="p-8">Analytics (Coming Soon)</div>} />
+        <Route path="/reports" component={Reports} />
+        <Route path="/analytics" component={Analytics} />
         <Route path="/404" component={NotFound} />
         <Route component={NotFound} />
       </Switch>
