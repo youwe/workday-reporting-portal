@@ -60,7 +60,7 @@ function Sidebar({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) 
         animate={{
           x: isOpen ? 0 : -280
         }}
-        className="fixed left-0 top-0 h-full w-70 sidebar z-50 lg:translate-x-0 lg:static"
+        className="fixed left-0 top-0 h-full w-70 sidebar z-50 lg:relative lg:translate-x-0"
       >
         <div className="flex flex-col h-full p-6">
           {/* Logo */}

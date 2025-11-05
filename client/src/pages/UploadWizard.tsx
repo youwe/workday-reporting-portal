@@ -1,96 +1,164 @@
-import { useState, useCallback } from "react";
+import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { trpc } from "@/lib/trpc";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { 
   Upload, 
-  CheckCircle2, 
-  XCircle, 
   FileText, 
-  Calendar,
-  Building2,
-  ArrowRight,
-  ArrowLeft,
-  Loader2
+  CheckCircle2,
+  AlertCircle,
+  Loader2,
+  X
 } from "lucide-react";
 import { toast } from "sonner";
 
-const steps = [
-  { id: 1, title: "Select Period", description: "Choose reporting period" },
-  { id: 2, title: "Select Organization", description: "Choose entity" },
-  { id: 3, title: "Upload Files", description: "Upload Workday exports" },
-  { id: 4, title: "Review & Process", description: "Confirm and process" },
+const UPLOAD_TYPES = [
+  { id: 'journal_lines', name: 'Journal Lines', description: 'General ledger entries' },
+  { id: 'customer_invoices', name: 'Customer Invoices', description: 'AR transactions' },
+  { id: 'supplier_invoices', name: 'Supplier Invoices', description: 'AP transactions' },
+  { id: 'customer_contracts', name: 'Customer Contracts', description: 'Revenue contracts' },
+  { id: 'time_entries', name: 'Time Entries', description: 'Billable hours' },
+  { id: 'bank_statements', name: 'Bank Statements', description: 'Cash positions' },
+  { id: 'customer_payments', name: 'Customer Payments', description: 'AR payments' },
+  { id: 'supplier_payments', name: 'Supplier Payments', description: 'AP payments' },
+  { id: 'billing_installments', name: 'Billing Installments', description: 'Revenue recognition' },
+  { id: 'tax_declarations', name: 'Tax Declarations', description: 'Tax filings' },
+  { id: 'hubspot_deals', name: 'HubSpot Deals', description: 'Sales pipeline' },
 ];
 
+interface UploadStatus {
+  type: string;
+  file: File;
+  status: 'pending' | 'uploading' | 'processing' | 'success' | 'error';
+  progress: number;
+  error?: string;
+  recordsProcessed?: number;
+  entitiesFound?: string[];
+}
+
 export default function UploadWizard() {
-  const [currentStep, setCurrentStep] = useState(1);
-  const [period, setPeriod] = useState("");
-  const [organizationId, setOrganizationId] = useState<number>();
-  const [uploadedFiles, setUploadedFiles] = useState<Record<string, File>>({});
-  const [processing, setProcessing] = useState(false);
+  const [uploads, setUploads] = useState<UploadStatus[]>([]);
+  const [isDragging, setIsDragging] = useState(false);
 
-  const { data: organizations } = trpc.organizations.list.useQuery();
-  const { data: uploadTypes } = trpc.uploadTypes.list.useQuery();
-  const createUpload = trpc.uploads.create.useMutation();
+  const uploadMutation = trpc.uploads.create.useMutation();
 
-  const handleFileUpload = useCallback((uploadTypeCode: string, file: File) => {
-    setUploadedFiles(prev => ({ ...prev, [uploadTypeCode]: file }));
-    toast.success(`${file.name} uploaded`);
-  }, []);
-
-  const handleDrop = useCallback((e: React.DragEvent, uploadTypeCode: string) => {
+  const handleDrop = (e: React.DragEvent, uploadType?: string) => {
     e.preventDefault();
-    const file = e.dataTransfer.files[0];
-    if (file && (file.name.endsWith('.csv') || file.name.endsWith('.xlsx'))) {
-      handleFileUpload(uploadTypeCode, file);
-    } else {
-      toast.error("Please upload CSV or Excel files only");
-    }
-  }, [handleFileUpload]);
+    setIsDragging(false);
 
-  const handleProcess = async () => {
-    setProcessing(true);
-    try {
-      // Upload files and create upload records
-      for (const [typeCode, file] of Object.entries(uploadedFiles)) {
-        const uploadType = uploadTypes?.find(t => t.code === typeCode);
-        if (!uploadType) continue;
+    const files = Array.from(e.dataTransfer.files);
+    handleFiles(files, uploadType);
+  };
 
-        await createUpload.mutateAsync({
-          organizationId,
-          uploadTypeId: uploadType.id,
-          period,
-          fileName: file.name,
-          fileType: file.name.endsWith('.csv') ? 'csv' : 'excel',
-          fileUrl: `/uploads/${file.name}`, // In real app, upload to S3 first
-        });
+  const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>, uploadType: string) => {
+    const files = Array.from(e.target.files || []);
+    handleFiles(files, uploadType);
+  };
+
+  const handleFiles = (files: File[], uploadType?: string) => {
+    files.forEach(file => {
+      // Determine upload type from filename if not specified
+      let type = uploadType;
+      if (!type) {
+        const filename = file.name.toLowerCase();
+        const matchedType = UPLOAD_TYPES.find(t => 
+          filename.includes(t.id.replace(/_/g, '-')) || 
+          filename.includes(t.id.replace(/_/g, ' '))
+        );
+        type = matchedType?.id || 'journal_lines';
       }
 
-      toast.success("All files processed successfully!");
-      setCurrentStep(1);
-      setUploadedFiles({});
-      setPeriod("");
-      setOrganizationId(undefined);
-    } catch (error) {
-      toast.error("Processing failed");
-    } finally {
-      setProcessing(false);
+      const newUpload: UploadStatus = {
+        type,
+        file,
+        status: 'pending',
+        progress: 0,
+      };
+
+      setUploads(prev => [...prev, newUpload]);
+      processUpload(newUpload);
+    });
+  };
+
+  const processUpload = async (upload: UploadStatus) => {
+    try {
+      // Update to uploading
+      setUploads(prev => prev.map(u => 
+        u.file === upload.file ? { ...u, status: 'uploading', progress: 30 } : u
+      ));
+
+      // Read file content
+      const content = await readFileContent(upload.file);
+
+      // Update to processing
+      setUploads(prev => prev.map(u => 
+        u.file === upload.file ? { ...u, status: 'processing', progress: 60 } : u
+      ));
+
+      // Upload to server
+      const result = await uploadMutation.mutateAsync({
+        uploadType: upload.type,
+        filename: upload.file.name,
+        content,
+      });
+
+      // Update to success
+      setUploads(prev => prev.map(u => 
+        u.file === upload.file ? { 
+          ...u, 
+          status: 'success', 
+          progress: 100,
+          recordsProcessed: result.recordsProcessed,
+          entitiesFound: result.entitiesFound,
+        } : u
+      ));
+
+      toast.success(`${upload.file.name} processed successfully!`);
+    } catch (error: any) {
+      setUploads(prev => prev.map(u => 
+        u.file === upload.file ? { 
+          ...u, 
+          status: 'error', 
+          progress: 0,
+          error: error.message || 'Upload failed',
+        } : u
+      ));
+      toast.error(`Failed to process ${upload.file.name}`);
     }
   };
 
-  const canProceed = () => {
-    if (currentStep === 1) return period !== "";
-    if (currentStep === 2) return organizationId !== undefined;
-    if (currentStep === 3) return Object.keys(uploadedFiles).length > 0;
-    return true;
+  const readFileContent = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => resolve(e.target?.result as string);
+      reader.onerror = reject;
+      reader.readAsText(file);
+    });
+  };
+
+  const removeUpload = (file: File) => {
+    setUploads(prev => prev.filter(u => u.file !== file));
+  };
+
+  const getStatusIcon = (status: UploadStatus['status']) => {
+    switch (status) {
+      case 'success':
+        return <CheckCircle2 className="w-5 h-5 text-green-500" />;
+      case 'error':
+        return <AlertCircle className="w-5 h-5 text-red-500" />;
+      case 'uploading':
+      case 'processing':
+        return <Loader2 className="w-5 h-5 animate-spin text-primary" />;
+      default:
+        return <FileText className="w-5 h-5 text-muted-foreground" />;
+    }
   };
 
   return (
-    <div className="p-8 max-w-6xl mx-auto">
+    <div className="p-8 max-w-7xl mx-auto">
       {/* Header */}
       <motion.div
         initial={{ opacity: 0, y: -20 }}
@@ -101,239 +169,209 @@ export default function UploadWizard() {
           Upload Workday Data
         </h1>
         <p className="text-muted-foreground text-lg">
-          Follow the steps to upload and process your financial data
+          Upload CSV files from Workday exports. All entities and periods are automatically detected.
         </p>
       </motion.div>
 
-      {/* Progress Steps */}
-      <div className="mb-8">
-        <div className="flex items-center justify-between mb-4">
-          {steps.map((step, index) => (
-            <div key={step.id} className="flex items-center flex-1">
-              <div className="flex flex-col items-center flex-1">
-                <motion.div
-                  initial={false}
-                  animate={{
-                    scale: currentStep === step.id ? 1.1 : 1,
-                    backgroundColor: currentStep >= step.id ? '#667eea' : '#333'
-                  }}
-                  className="w-12 h-12 rounded-full flex items-center justify-center text-white font-semibold mb-2"
-                >
-                  {currentStep > step.id ? (
-                    <CheckCircle2 className="w-6 h-6" />
-                  ) : (
-                    step.id
-                  )}
-                </motion.div>
-                <div className="text-center">
-                  <div className="font-semibold text-sm">{step.title}</div>
-                  <div className="text-xs text-muted-foreground">{step.description}</div>
-                </div>
-              </div>
-              {index < steps.length - 1 && (
-                <div className="flex-1 h-1 bg-secondary mx-4 mt-[-40px]">
-                  <motion.div
-                    initial={false}
-                    animate={{
-                      width: currentStep > step.id ? '100%' : '0%'
-                    }}
-                    className="h-full bg-primary"
-                    transition={{ duration: 0.3 }}
+      {/* Global Drop Zone */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.1 }}
+        onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+        onDragLeave={() => setIsDragging(false)}
+        onDrop={(e) => handleDrop(e)}
+        className={`p-12 rounded-xl border-2 border-dashed transition-all cursor-pointer mb-8 ${
+          isDragging 
+            ? 'border-primary bg-primary/10' 
+            : 'border-border hover:border-primary/50 hover:bg-secondary/30'
+        }`}
+      >
+        <Upload className="w-12 h-12 mx-auto mb-4 text-primary" />
+        <h3 className="text-xl font-semibold mb-2 text-center">Drop files here</h3>
+        <p className="text-muted-foreground mb-4 text-center">
+          Or click below to select files for specific types
+        </p>
+        <p className="text-sm text-muted-foreground text-center">
+          Supports CSV files • All entities included • Dates auto-detected
+        </p>
+      </motion.div>
+
+      {/* Upload Type Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
+        {UPLOAD_TYPES.map((type, index) => (
+          <motion.div
+            key={type.id}
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.2 + index * 0.05 }}
+          >
+            <Card className="glass-card hover:ring-2 hover:ring-primary/50 transition-all cursor-pointer">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <FileText className="w-4 h-4" />
+                  {type.name}
+                </CardTitle>
+                <CardDescription className="text-xs">
+                  {type.description}
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <label className="cursor-pointer">
+                  <input
+                    type="file"
+                    accept=".csv"
+                    className="hidden"
+                    onChange={(e) => handleFileInput(e, type.id)}
                   />
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
+                  <Button variant="outline" size="sm" className="w-full" asChild>
+                    <span>
+                      <Upload className="w-4 h-4 mr-2" />
+                      Select File
+                    </span>
+                  </Button>
+                </label>
+              </CardContent>
+            </Card>
+          </motion.div>
+        ))}
       </div>
 
-      {/* Step Content */}
-      <AnimatePresence mode="wait">
+      {/* Upload Queue */}
+      {uploads.length > 0 && (
         <motion.div
-          key={currentStep}
-          initial={{ opacity: 0, x: 20 }}
-          animate={{ opacity: 1, x: 0 }}
-          exit={{ opacity: 0, x: -20 }}
-          transition={{ duration: 0.3 }}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
         >
           <Card className="glass-card">
             <CardHeader>
-              <CardTitle>{steps[currentStep - 1].title}</CardTitle>
-              <CardDescription>{steps[currentStep - 1].description}</CardDescription>
+              <CardTitle>Upload Queue</CardTitle>
+              <CardDescription>
+                {uploads.filter(u => u.status === 'success').length} / {uploads.length} completed
+              </CardDescription>
             </CardHeader>
-            <CardContent className="min-h-[400px]">
-              {/* Step 1: Select Period */}
-              {currentStep === 1 && (
-                <div className="space-y-6">
-                  <div className="flex items-center gap-4 p-6 rounded-lg bg-secondary/50">
-                    <Calendar className="w-8 h-8 text-primary" />
-                    <div className="flex-1">
-                      <label className="block text-sm font-medium mb-2">
-                        Reporting Period
-                      </label>
-                      <Select value={period} onValueChange={setPeriod}>
-                        <SelectTrigger className="w-full">
-                          <SelectValue placeholder="Select period" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="2024-Q1">2024 Q1</SelectItem>
-                          <SelectItem value="2024-Q2">2024 Q2</SelectItem>
-                          <SelectItem value="2024-Q3">2024 Q3</SelectItem>
-                          <SelectItem value="2024-Q4">2024 Q4</SelectItem>
-                          <SelectItem value="2024-01">January 2024</SelectItem>
-                          <SelectItem value="2024-02">February 2024</SelectItem>
-                          <SelectItem value="2024-03">March 2024</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Step 2: Select Organization */}
-              {currentStep === 2 && (
-                <div className="space-y-6">
-                  <div className="flex items-center gap-4 p-6 rounded-lg bg-secondary/50">
-                    <Building2 className="w-8 h-8 text-primary" />
-                    <div className="flex-1">
-                      <label className="block text-sm font-medium mb-2">
-                        Organization / Entity
-                      </label>
-                      <Select 
-                        value={organizationId?.toString()} 
-                        onValueChange={(v) => setOrganizationId(parseInt(v))}
-                      >
-                        <SelectTrigger className="w-full">
-                          <SelectValue placeholder="Select organization" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {organizations?.map(org => (
-                            <SelectItem key={org.id} value={org.id.toString()}>
-                              {org.name} ({org.type})
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Step 3: Upload Files */}
-              {currentStep === 3 && (
-                <div className="space-y-4">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {uploadTypes?.map(type => (
-                      <div
-                        key={type.id}
-                        className={`upload-zone ${uploadedFiles[type.code] ? 'active' : ''}`}
-                        onDrop={(e) => handleDrop(e, type.code)}
-                        onDragOver={(e) => e.preventDefault()}
-                        onClick={() => {
-                          const input = document.createElement('input');
-                          input.type = 'file';
-                          input.accept = '.csv,.xlsx';
-                          input.onchange = (e) => {
-                            const file = (e.target as HTMLInputElement).files?.[0];
-                            if (file) handleFileUpload(type.code, file);
-                          };
-                          input.click();
-                        }}
-                      >
-                        <div className="flex items-center gap-3">
-                          {uploadedFiles[type.code] ? (
-                            <CheckCircle2 className="w-6 h-6 text-green-500" />
-                          ) : (
-                            <FileText className="w-6 h-6 text-muted-foreground" />
+            <CardContent className="space-y-4">
+              <AnimatePresence>
+                {uploads.map((upload, index) => (
+                  <motion.div
+                    key={`${upload.file.name}-${index}`}
+                    initial={{ opacity: 0, x: -20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: 20 }}
+                    className="flex items-start gap-4 p-4 rounded-lg bg-secondary/30"
+                  >
+                    {getStatusIcon(upload.status)}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between mb-1">
+                        <div className="font-medium truncate">{upload.file.name}</div>
+                        <div className="flex items-center gap-2">
+                          <Badge variant="outline" className="text-xs">
+                            {UPLOAD_TYPES.find(t => t.id === upload.type)?.name}
+                          </Badge>
+                          {upload.status !== 'uploading' && upload.status !== 'processing' && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6"
+                              onClick={() => removeUpload(upload.file)}
+                            >
+                              <X className="w-4 h-4" />
+                            </Button>
                           )}
-                          <div className="flex-1">
-                            <div className="font-semibold">{type.name}</div>
-                            <div className="text-sm text-muted-foreground">
-                              {uploadedFiles[type.code]?.name || 'Click or drag to upload'}
-                            </div>
-                          </div>
                         </div>
                       </div>
-                    ))}
-                  </div>
-                  <div className="text-sm text-muted-foreground text-center mt-4">
-                    Upload at least one file to continue
-                  </div>
-                </div>
-              )}
+                      
+                      {(upload.status === 'uploading' || upload.status === 'processing') && (
+                        <Progress value={upload.progress} className="h-2 mb-2" />
+                      )}
 
-              {/* Step 4: Review */}
-              {currentStep === 4 && (
-                <div className="space-y-6">
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between p-4 rounded-lg bg-secondary/50">
-                      <span className="font-medium">Period:</span>
-                      <Badge variant="secondary">{period}</Badge>
+                      {upload.status === 'success' && upload.recordsProcessed && (
+                        <div className="text-sm text-muted-foreground">
+                          ✓ {upload.recordsProcessed} records processed
+                          {upload.entitiesFound && upload.entitiesFound.length > 0 && (
+                            <span className="ml-2">
+                              • Entities: {upload.entitiesFound.join(', ')}
+                            </span>
+                          )}
+                        </div>
+                      )}
+
+                      {upload.status === 'error' && (
+                        <div className="text-sm text-red-500">
+                          {upload.error}
+                        </div>
+                      )}
+
+                      {upload.status === 'pending' && (
+                        <div className="text-sm text-muted-foreground">
+                          Waiting to process...
+                        </div>
+                      )}
+
+                      {upload.status === 'uploading' && (
+                        <div className="text-sm text-muted-foreground">
+                          Uploading file...
+                        </div>
+                      )}
+
+                      {upload.status === 'processing' && (
+                        <div className="text-sm text-muted-foreground">
+                          Processing data...
+                        </div>
+                      )}
                     </div>
-                    <div className="flex items-center justify-between p-4 rounded-lg bg-secondary/50">
-                      <span className="font-medium">Organization:</span>
-                      <Badge variant="secondary">
-                        {organizations?.find(o => o.id === organizationId)?.name}
-                      </Badge>
-                    </div>
-                    <div className="p-4 rounded-lg bg-secondary/50">
-                      <div className="font-medium mb-2">Files to process:</div>
-                      <div className="space-y-2">
-                        {Object.entries(uploadedFiles).map(([code, file]) => (
-                          <div key={code} className="flex items-center gap-2 text-sm">
-                            <CheckCircle2 className="w-4 h-4 text-green-500" />
-                            <span>{uploadTypes?.find(t => t.code === code)?.name}</span>
-                            <span className="text-muted-foreground">({file.name})</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
+                  </motion.div>
+                ))}
+              </AnimatePresence>
             </CardContent>
           </Card>
         </motion.div>
-      </AnimatePresence>
+      )}
 
-      {/* Navigation */}
-      <div className="flex items-center justify-between mt-8">
-        <Button
-          variant="outline"
-          onClick={() => setCurrentStep(prev => Math.max(1, prev - 1))}
-          disabled={currentStep === 1 || processing}
-        >
-          <ArrowLeft className="w-4 h-4 mr-2" />
-          Previous
-        </Button>
-
-        {currentStep < 4 ? (
-          <Button
-            onClick={() => setCurrentStep(prev => prev + 1)}
-            disabled={!canProceed()}
-          >
-            Next
-            <ArrowRight className="w-4 h-4 ml-2" />
-          </Button>
-        ) : (
-          <Button
-            onClick={handleProcess}
-            disabled={processing}
-          >
-            {processing ? (
-              <>
-                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                Processing...
-              </>
-            ) : (
-              <>
-                <Upload className="w-4 h-4 mr-2" />
-                Process Files
-              </>
-            )}
-          </Button>
-        )}
-      </div>
+      {/* Info Card */}
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ delay: 0.5 }}
+        className="mt-8"
+      >
+        <Card className="glass-card">
+          <CardHeader>
+            <CardTitle className="text-lg">How It Works</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-sm">
+              <div>
+                <div className="font-semibold mb-2 flex items-center gap-2">
+                  <span className="w-6 h-6 rounded-full bg-primary/20 flex items-center justify-center text-primary text-xs">1</span>
+                  Upload Files
+                </div>
+                <p className="text-muted-foreground">
+                  Drag & drop or select CSV files from Workday. No need to select period or entity - it's all automatic.
+                </p>
+              </div>
+              <div>
+                <div className="font-semibold mb-2 flex items-center gap-2">
+                  <span className="w-6 h-6 rounded-full bg-primary/20 flex items-center justify-center text-primary text-xs">2</span>
+                  Auto-Detection
+                </div>
+                <p className="text-muted-foreground">
+                  System automatically detects all entities and periods from the data. Dates are parsed and categorized.
+                </p>
+              </div>
+              <div>
+                <div className="font-semibold mb-2 flex items-center gap-2">
+                  <span className="w-6 h-6 rounded-full bg-primary/20 flex items-center justify-center text-primary text-xs">3</span>
+                  Ready to Report
+                </div>
+                <p className="text-muted-foreground">
+                  View dashboards, generate reports, and analyze KPIs with proper consolidation and eliminations.
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </motion.div>
     </div>
   );
 }

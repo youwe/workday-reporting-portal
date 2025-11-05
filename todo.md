@@ -57,3 +57,17 @@
 - [x] Rapportage generatie testen
 - [x] CSV export testen
 - [x] Checkpoint voor deployment
+
+## Critical Refactoring (User Feedback - Jan 2025)
+- [x] Fix desktop menu visibility issue
+- [x] Remove period selection from upload flow (derive from data)
+- [x] Remove entity selection from upload flow (all entities in one CSV)
+- [ ] Implement correct CSV parsing for multi-entity data
+- [ ] Auto-detect periods from date columns in uploaded data
+- [ ] Update dashboard with entity filter (single entity OR consolidation)
+- [ ] Implement proper intercompany elimination logic
+- [ ] Fix ownership percentage (70% Youwe ConnectiT, not Youwe Concept)
+- [ ] Create admin interface for entity management
+- [ ] Create admin interface for consolidation rules
+- [ ] Process uploaded CSV files (Customer Invoices, Journals, etc.)
+- [ ] Display real data in reports instead of mock data
