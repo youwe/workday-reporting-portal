@@ -36,8 +36,8 @@ COPY package.json pnpm-lock.yaml* ./
 # Copy patches directory (required for pnpm install)
 COPY patches ./patches
 
-# Install production dependencies
-RUN pnpm install --prod --frozen-lockfile
+# Install all dependencies (vite is needed for bundled code)
+RUN pnpm install --frozen-lockfile
 
 # Copy built application from builder
 COPY --from=builder /app/dist ./dist
