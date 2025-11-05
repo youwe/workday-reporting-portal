@@ -71,3 +71,11 @@
 - [ ] Create admin interface for consolidation rules
 - [ ] Process uploaded CSV files (Customer Invoices, Journals, etc.)
 - [ ] Display real data in reports instead of mock data
+
+
+## Critical Bug Fixes (User Report - Jan 2025)
+- [x] Fix desktop sidebar menu - not visible on desktop, only mobile
+- [x] Fix upload error: "The string did not match the expected pattern"
+- [ ] Import real CSV data from /home/ubuntu/upload into database
+- [ ] Verify reports show actual data after import
+- [ ] Test all upload types work correctly

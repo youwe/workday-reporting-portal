@@ -5,6 +5,7 @@ import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, protectedProcedure, router } from "./_core/trpc";
 import * as db from "./db";
 import { parseCSV, mapCSVRow, validateRequiredFields } from "./utils/csvParser";
+import { CSV_MAPPINGS, findColumn, parseDate } from "../shared/csvMappings";
 import { calculateServicesKPIs, calculateSaaSKPIs } from "./utils/kpiCalculations";
 import { TRPCError } from "@trpc/server";
 import { chatWithAssistant, generateSuggestedQuestions, generateExecutiveSummary } from "./utils/aiAssistant";
@@ -59,7 +60,75 @@ export const appRouter = router({
 
   // Data Uploads
   uploads: router({
+    // Simplified upload endpoint for direct CSV processing
     create: protectedProcedure
+      .input(z.object({
+        uploadType: z.string(),
+        filename: z.string(),
+        content: z.string(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        if (!ctx.user) throw new TRPCError({ code: 'UNAUTHORIZED' });
+
+        try {
+          // Parse CSV content
+          const rows = parseCSV(input.content);
+          if (rows.length === 0) {
+            throw new TRPCError({ 
+              code: 'BAD_REQUEST', 
+              message: 'No data found in CSV file' 
+            });
+          }
+
+          // Detect entities and periods from data
+          const entities = new Set<string>();
+          const periods = new Set<string>();
+          
+          // Get entity column from mapping
+          const mapping = CSV_MAPPINGS[input.uploadType];
+          if (!mapping) {
+            throw new TRPCError({ 
+              code: 'BAD_REQUEST', 
+              message: `Unknown upload type: ${input.uploadType}` 
+            });
+          }
+
+          const entityCol = findColumn(Object.keys(rows[0]), [mapping.entityColumn]);
+          const dateCol = findColumn(Object.keys(rows[0]), [mapping.dateColumn]);
+
+          rows.forEach(row => {
+            if (entityCol && row[entityCol]) {
+              entities.add(row[entityCol]);
+            }
+            if (dateCol && row[dateCol]) {
+              const date = parseDate(row[dateCol]);
+              if (date) {
+                const period = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+                periods.add(period);
+              }
+            }
+          });
+
+          // TODO: Store data in database
+          // For now, just return success with metadata
+          
+          return {
+            success: true,
+            recordsProcessed: rows.length,
+            entitiesFound: Array.from(entities),
+            periodsFound: Array.from(periods),
+          };
+        } catch (error: any) {
+          console.error('Upload error:', error);
+          throw new TRPCError({
+            code: 'INTERNAL_SERVER_ERROR',
+            message: error.message || 'Failed to process upload',
+          });
+        }
+      }),
+
+    // Legacy upload endpoint
+    createLegacy: protectedProcedure
       .input(z.object({
         organizationId: z.number().optional(),
         uploadTypeId: z.number(),

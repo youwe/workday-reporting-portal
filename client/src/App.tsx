@@ -22,12 +22,19 @@ import {
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { AIChat } from "@/components/AIChat";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { trpc } from "./lib/trpc";
 
 function Sidebar({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
   const { user, logout } = useAuth();
   const logoutMutation = trpc.auth.logout.useMutation();
+  const [isDesktop, setIsDesktop] = useState(typeof window !== 'undefined' && window.innerWidth >= 1024);
+
+  useEffect(() => {
+    const handleResize = () => setIsDesktop(window.innerWidth >= 1024);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   const handleLogout = async () => {
     await logoutMutation.mutateAsync();
@@ -58,9 +65,9 @@ function Sidebar({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) 
       <motion.aside
         initial={false}
         animate={{
-          x: isOpen ? 0 : -280
+          x: isDesktop ? 0 : (isOpen ? 0 : -280)
         }}
-        className="fixed left-0 top-0 h-full w-70 sidebar z-50 lg:relative lg:translate-x-0"
+        className="fixed left-0 top-0 h-full w-70 sidebar z-50 lg:static"
       >
         <div className="flex flex-col h-full p-6">
           {/* Logo */}
