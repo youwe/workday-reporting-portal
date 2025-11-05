@@ -1,11 +1,36 @@
-import { eq } from "drizzle-orm";
+import { eq, and, inArray, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, users, organizations, InsertOrganization, dataUploads, InsertDataUpload, financialData, InsertFinancialData, reports, InsertReport } from "../drizzle/schema";
+import { 
+  InsertUser, 
+  users, 
+  organizations,
+  uploadTypes,
+  dataUploads,
+  journalLines,
+  customerInvoices,
+  supplierInvoices,
+  customerContracts,
+  timeEntries,
+  intercompanyTransactions,
+  kpiData,
+  reports,
+  type Organization,
+  type UploadType,
+  type DataUpload,
+  type JournalLine,
+  type InsertJournalLine,
+  type InsertCustomerInvoice,
+  type InsertSupplierInvoice,
+  type InsertCustomerContract,
+  type InsertTimeEntry,
+  type InsertIntercompanyTransaction,
+  type InsertKpiData,
+} from "../drizzle/schema";
 import { ENV } from './_core/env';
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
-// Lazily create the drizzle instance so local tooling can run without a DB.
+// Lazily create the drizzle instance
 export async function getDb() {
   if (!_db && process.env.DATABASE_URL) {
     try {
@@ -17,6 +42,8 @@ export async function getDb() {
   }
   return _db;
 }
+
+// ========== USER FUNCTIONS ==========
 
 export async function upsertUser(user: InsertUser): Promise<void> {
   if (!user.openId) {
@@ -85,92 +112,192 @@ export async function getUserByOpenId(openId: string) {
   }
 
   const result = await db.select().from(users).where(eq(users.openId, openId)).limit(1);
-
   return result.length > 0 ? result[0] : undefined;
 }
 
-// Organization queries
-export async function getAllOrganizations() {
+// ========== ORGANIZATION FUNCTIONS ==========
+
+export async function getAllOrganizations(): Promise<Organization[]> {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(organizations);
+  
+  const result = await db.select().from(organizations).where(eq(organizations.active, true));
+  return result;
 }
 
-export async function getOrganizationById(id: number) {
+export async function getOrganizationById(id: number): Promise<Organization | undefined> {
   const db = await getDb();
   if (!db) return undefined;
+  
   const result = await db.select().from(organizations).where(eq(organizations.id, id)).limit(1);
-  return result.length > 0 ? result[0] : undefined;
+  return result[0];
 }
 
-export async function createOrganization(org: InsertOrganization) {
+export async function getOrganizationsByParent(parentId: number | null): Promise<Organization[]> {
   const db = await getDb();
-  if (!db) throw new Error("Database not available");
-  const result = await db.insert(organizations).values(org);
+  if (!db) return [];
+  
+  const result = await db.select().from(organizations).where(
+    parentId === null 
+      ? sql`${organizations.parentId} IS NULL`
+      : eq(organizations.parentId, parentId)
+  );
   return result;
 }
 
-// Data upload queries
-export async function createDataUpload(upload: InsertDataUpload) {
+// ========== UPLOAD TYPE FUNCTIONS ==========
+
+export async function getAllUploadTypes(): Promise<UploadType[]> {
   const db = await getDb();
-  if (!db) throw new Error("Database not available");
-  const result = await db.insert(dataUploads).values(upload);
+  if (!db) return [];
+  
+  const result = await db.select().from(uploadTypes)
+    .where(eq(uploadTypes.active, true))
+    .orderBy(uploadTypes.sortOrder);
   return result;
 }
 
-export async function getDataUploadsByOrganization(organizationId: number) {
+export async function getUploadTypeByCode(code: string): Promise<UploadType | undefined> {
   const db = await getDb();
-  if (!db) return [];
-  return db.select().from(dataUploads).where(eq(dataUploads.organizationId, organizationId)).orderBy(dataUploads.uploadedAt);
+  if (!db) return undefined;
+  
+  const result = await db.select().from(uploadTypes).where(eq(uploadTypes.code, code)).limit(1);
+  return result[0];
 }
 
-export async function getAllDataUploads() {
-  const db = await getDb();
-  if (!db) return [];
-  return db.select().from(dataUploads).orderBy(dataUploads.uploadedAt);
-}
+// ========== DATA UPLOAD FUNCTIONS ==========
 
-export async function updateDataUploadStatus(id: number, status: "pending" | "processing" | "completed" | "failed", errorMessage?: string) {
+export async function createDataUpload(upload: Omit<DataUpload, 'id' | 'uploadedAt'>): Promise<number> {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  return db.update(dataUploads).set({ status, errorMessage }).where(eq(dataUploads.id, id));
+  
+  const result = await db.insert(dataUploads).values(upload as any);
+  return result[0].insertId;
 }
 
-// Financial data queries
-export async function createFinancialData(data: InsertFinancialData[]) {
-  const db = await getDb();
-  if (!db) throw new Error("Database not available");
-  return db.insert(financialData).values(data);
-}
-
-export async function getFinancialDataByUpload(uploadId: number) {
+export async function getDataUploadsByPeriod(period: string): Promise<DataUpload[]> {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(financialData).where(eq(financialData.uploadId, uploadId));
+  
+  const result = await db.select().from(dataUploads).where(eq(dataUploads.period, period));
+  return result;
 }
 
-export async function getFinancialDataByOrganizationAndPeriod(organizationId: number, period: string) {
+export async function updateDataUploadStatus(
+  id: number, 
+  status: 'pending' | 'processing' | 'completed' | 'failed',
+  recordCount?: number,
+  errorMessage?: string
+): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  
+  await db.update(dataUploads)
+    .set({ status, recordCount, errorMessage })
+    .where(eq(dataUploads.id, id));
+}
+
+// ========== JOURNAL LINES FUNCTIONS ==========
+
+export async function insertJournalLines(lines: InsertJournalLine[]): Promise<void> {
+  const db = await getDb();
+  if (!db || lines.length === 0) return;
+  
+  await db.insert(journalLines).values(lines as any);
+}
+
+export async function getJournalLinesByPeriod(period: string): Promise<JournalLine[]> {
   const db = await getDb();
   if (!db) return [];
-  const { and } = await import("drizzle-orm");
-  return db.select().from(financialData).where(and(eq(financialData.organizationId, organizationId), eq(financialData.period, period)));
+  
+  // Extract period from accounting date (assuming format like "1/1/24" or "2024-01-01")
+  const result = await db.select().from(journalLines)
+    .where(sql`${journalLines.accountingDate} LIKE ${`%${period}%`}`);
+  return result;
 }
 
-// Report queries
-export async function createReport(report: InsertReport) {
+// ========== CUSTOMER INVOICE FUNCTIONS ==========
+
+export async function insertCustomerInvoices(invoices: InsertCustomerInvoice[]): Promise<void> {
   const db = await getDb();
-  if (!db) throw new Error("Database not available");
-  return db.insert(reports).values(report);
+  if (!db || invoices.length === 0) return;
+  
+  await db.insert(customerInvoices).values(invoices as any);
 }
 
-export async function getReportsByOrganization(organizationId: number) {
+// ========== SUPPLIER INVOICE FUNCTIONS ==========
+
+export async function insertSupplierInvoices(invoices: InsertSupplierInvoice[]): Promise<void> {
+  const db = await getDb();
+  if (!db || invoices.length === 0) return;
+  
+  await db.insert(supplierInvoices).values(invoices as any);
+}
+
+// ========== CUSTOMER CONTRACT FUNCTIONS ==========
+
+export async function insertCustomerContracts(contracts: InsertCustomerContract[]): Promise<void> {
+  const db = await getDb();
+  if (!db || contracts.length === 0) return;
+  
+  await db.insert(customerContracts).values(contracts as any);
+}
+
+// ========== TIME ENTRY FUNCTIONS ==========
+
+export async function insertTimeEntries(entries: InsertTimeEntry[]): Promise<void> {
+  const db = await getDb();
+  if (!db || entries.length === 0) return;
+  
+  await db.insert(timeEntries).values(entries as any);
+}
+
+// ========== INTERCOMPANY TRANSACTION FUNCTIONS ==========
+
+export async function insertIntercompanyTransactions(transactions: InsertIntercompanyTransaction[]): Promise<void> {
+  const db = await getDb();
+  if (!db || transactions.length === 0) return;
+  
+  await db.insert(intercompanyTransactions).values(transactions as any);
+}
+
+export async function getIntercompanyTransactionsByPeriod(period: string): Promise<any[]> {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(reports).where(eq(reports.organizationId, organizationId)).orderBy(reports.generatedAt);
+  
+  const result = await db.select().from(intercompanyTransactions)
+    .where(eq(intercompanyTransactions.period, period));
+  return result;
 }
 
-export async function getAllReports() {
+// ========== KPI FUNCTIONS ==========
+
+export async function insertKpiData(kpis: InsertKpiData[]): Promise<void> {
+  const db = await getDb();
+  if (!db || kpis.length === 0) return;
+  
+  await db.insert(kpiData).values(kpis as any);
+}
+
+export async function getKpisByOrganizationAndPeriod(organizationId: number, period: string): Promise<any[]> {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(reports).orderBy(reports.generatedAt);
+  
+  const result = await db.select().from(kpiData)
+    .where(and(
+      eq(kpiData.organizationId, organizationId),
+      eq(kpiData.period, period)
+    ));
+  return result;
+}
+
+// ========== REPORT FUNCTIONS ==========
+
+export async function getReportsByOrganization(organizationId: number): Promise<any[]> {
+  const db = await getDb();
+  if (!db) return [];
+  
+  const result = await db.select().from(reports)
+    .where(eq(reports.organizationId, organizationId));
+  return result;
 }

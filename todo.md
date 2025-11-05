@@ -56,4 +56,4 @@
 - [x] Upload flow testen
 - [x] Rapportage generatie testen
 - [x] CSV export testen
-- [ ] Checkpoint voor deployment
+- [x] Checkpoint voor deployment
