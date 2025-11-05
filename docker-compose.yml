@@ -36,6 +36,7 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-workday_user}:${POSTGRES_PASSWORD:-workday_pass}@db:5432/${POSTGRES_DB:-workday_reporting}?sslmode=disable
       NODE_ENV: ${NODE_ENV:-production}
       JWT_SECRET: ${JWT_SECRET:-change-this-in-production}
+      OAUTH_SERVER_URL: http://localhost:3000
       OAUTH_CLIENT_ID: ${OAUTH_CLIENT_ID:-dev-client}
       OAUTH_CLIENT_SECRET: ${OAUTH_CLIENT_SECRET:-dev-secret}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}

@@ -5,12 +5,12 @@
 import pg from 'pg';
 const { Client } = pg;
 
+// Use DATABASE_URL from environment or default to local Docker
+const connectionString = process.env.DATABASE_URL || 'postgresql://workday_user:workday_pass@localhost:5432/workday_reporting';
+
 const pgConfig = {
-  host: 'ep-lingering-art-ag8zbrex-pooler.c-2.eu-central-1.aws.neon.tech',
-  user: 'neondb_owner',
-  password: 'npg_0RxnAbqOcZ1N',
-  database: 'neondb',
-  ssl: { rejectUnauthorized: false },
+  connectionString,
+  ssl: connectionString.includes('sslmode=require') ? { rejectUnauthorized: false } : false,
 };
 
 async function main() {
