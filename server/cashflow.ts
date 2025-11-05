@@ -10,7 +10,17 @@
  * - Billing installments (scheduled future revenue)
  */
 
-import { db } from './db';
+import mysql from 'mysql2/promise';
+
+// Create database connection
+const connection = await mysql.createConnection({
+  host: 'localhost',
+  user: 'workday_user',
+  password: 'workday_pass',
+  database: 'workday_reporting',
+});
+
+const db = { execute: connection.execute.bind(connection) };
 
 export interface CashflowProjection {
   month: string;
