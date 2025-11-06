@@ -167,7 +167,9 @@ export async function getUploadTypeByCode(code: string): Promise<UploadType | un
   const db = await getDb();
   if (!db) return undefined;
   
-  const result = await db.select().from(uploadTypes).where(eq(uploadTypes.code, code)).limit(1);
+  // Convert to uppercase for case-insensitive matching
+  const upperCode = code.toUpperCase();
+  const result = await db.select().from(uploadTypes).where(eq(uploadTypes.code, upperCode)).limit(1);
   return result[0];
 }
 
