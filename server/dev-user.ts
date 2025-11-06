@@ -17,5 +17,12 @@ export const DEV_USER: User = {
 };
 
 export function shouldUseDevUser(): boolean {
-  return process.env.NODE_ENV === 'development' && process.env.USE_DEV_AUTH !== 'false';
+  // Use dev user if:
+  // 1. Explicitly in development mode, OR
+  // 2. OAuth is not configured (no OAUTH_CLIENT_ID)
+  const isDevMode = process.env.NODE_ENV === 'development';
+  const oauthNotConfigured = !process.env.OAUTH_CLIENT_ID || process.env.OAUTH_CLIENT_ID === 'dev-client';
+  const notExplicitlyDisabled = process.env.USE_DEV_AUTH !== 'false';
+  
+  return (isDevMode || oauthNotConfigured) && notExplicitlyDisabled;
 }
