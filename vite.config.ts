@@ -12,6 +12,7 @@ const plugins = [react(), tailwindcss(), jsxLocPlugin(), vitePluginManusRuntime(
 export default defineConfig({
   plugins,
   define: {
+    'import.meta.env.VITE_APP_TITLE': JSON.stringify(process.env.VITE_APP_TITLE || 'Workday Reporting Portal'),
     'import.meta.env.VITE_APP_LOGO': JSON.stringify(process.env.VITE_APP_LOGO || '/logo.png'),
     'import.meta.env.VITE_ANALYTICS_ENDPOINT': JSON.stringify(process.env.VITE_ANALYTICS_ENDPOINT || ''),
     'import.meta.env.VITE_API_URL': JSON.stringify(process.env.VITE_API_URL || '/api'),
