@@ -179,8 +179,8 @@ export async function createDataUpload(upload: Omit<DataUpload, 'id' | 'uploaded
   const db = await getDb();
   if (!db) throw new Error("Database not available");
   
-  const result = await db.insert(dataUploads).values(upload as any);
-  return result[0].insertId;
+  const result = await db.insert(dataUploads).values(upload as any).returning({ id: dataUploads.id });
+  return result[0].id;
 }
 
 export async function getDataUploadsByPeriod(period: string): Promise<DataUpload[]> {
